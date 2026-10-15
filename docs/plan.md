@@ -29,8 +29,9 @@ Think 1Password, but for facts about you instead of passwords.
 |---|---|
 | **memory** | One unit of recall: a fact or an episode. Has a type, a vault, categories, text, an embedding and provenance. |
 | **source** | Raw context a memory may be extracted from: a Claude Code transcript, an agent's local memory file, a ChatGPT export, a pasted note. Kept so provenance can point at it. |
-| **vault** | The access partition. A memory is in exactly one vault. Initial set: `personal`, `work`, `coding`. |
-| **category** | Free-form tags for filtering within or across vaults (`python`, `family`, `music`). Many per memory. |
+| **vault** | *Who may see it.* The access partition, and only that. A memory is in exactly one vault. Initial set: `personal`, `work`, `coding`. |
+| **project** | *When it applies.* Optional. A short human name (`iam`, `my-notebooks`), not a path. Null means everywhere. Recall for a project returns that project's memories plus the global ones, never another project's. |
+| **category** | *What it is about.* Free-form flat tags (`python`, `family`, `music`). Many per memory. No `key:value` grammar: if a dimension needs structure, it gets a field. |
 | **client** | An agent identity: `claude-code`, `claude-desktop`, `codex`, or `user` for the CLI. |
 | **grant** | client × vault × mode (`read`, `write`, `read-write`) × optional expiry. No grant, no access, and no hint that the vault exists. |
 | **audit** | Append-only log of every action against the vault. |
@@ -60,6 +61,7 @@ is ever needed. IDs are ULIDs (sortable, no coordination).
   "id": "01J...",
   "type": "fact",                       // fact | episode
   "vault": "coding",
+  "project": null,                      // "iam" for a memory that applies only there
   "categories": ["python", "llm"],
   "text": "Prefers OpenAI-compatible clients with base_url over vendor SDKs.",
   "embedding": [/* float32 */],         // stored as blob in SQLite
@@ -138,9 +140,10 @@ A hash chain over rows is a cheap later addition if tamper-evidence matters; not
 
 ### `iam.core` — the only way in
 
-- `recall(actor, query, *, types, categories, vault, limit, reason)` — filters in SQL
-  (vault ∩ grants, type, categories, status=active), cosine over the survivors in numpy,
-  audit row with the returned ids. Personal scale: brute force is fine past 100k memories.
+- `recall(actor, query, *, types, categories, vault, project, limit, reason)` — filters in
+  SQL (vault ∩ grants, type, categories, status=active, and `project IS NULL OR project = ?`
+  when a project is given), cosine over the survivors in numpy, audit row with the returned
+  ids. Personal scale: brute force is fine past 100k memories.
 - `remember(actor, text, type, vault, categories, reason, *, supersedes, source_ids, session)`
   — grant check, embed, insert memory + audit row in one transaction.
 - `forget(actor, id, reason)` — sets `retracted`; nothing is ever physically deleted.
@@ -158,7 +161,8 @@ and the interface exists so that stays true for as long as possible.
 ### `iam-mcp` — the agent surface
 
 Python `mcp` package (2.x), stdio transport, one process per client. Identity comes from
-the launch args, which is how each client's config already works:
+the launch args, which is how each client's config already works. The project comes from
+the server's working directory (its basename), so agents never have to name it:
 
 ```json
 { "mcpServers": { "iam": { "command": "iam-mcp", "args": ["--client", "claude-code"] } } }
@@ -169,8 +173,8 @@ Tools, all logged, all requiring `reason`:
 | tool | does |
 |---|---|
 | `whoami()` | the vaults this client can read and write. Lets an agent behave without guessing. |
-| `recall(query, types?, categories?, vault?, limit?, reason)` | search within granted vaults. Ungranted vaults are omitted, not redacted. |
-| `remember(text, type, vault, categories?, reason, supersedes?)` | write a memory. |
+| `recall(query, types?, categories?, vault?, limit?, reason)` | search within granted vaults, scoped to the server's project plus global memories. Ungranted vaults are omitted, not redacted. |
+| `remember(text, type, vault, categories?, reason, supersedes?, everywhere?)` | write a memory. Scoped to the server's project unless `everywhere` is set. |
 | `log_episode(summary, project?, outcome?, reason)` | sugar for `remember(type="episode")` with the session attached. |
 | `capture(content, kind, reason)` | hand over raw context for later extraction, without asserting anything. |
 | `forget(id, reason)` | retract. |
@@ -255,6 +259,12 @@ existing history.
 
 **4. Claude Code plugin** — pull / push / evict. The cache story becomes real.
 
+**4b. Project scope** — the `project` field on memories; `recall`, `list` and `pull` take
+it and return "this project plus global"; the MCP server and capture derive it from the
+working directory's basename; `iam claude-code import` sets it from the project the memory
+dir belongs to. Migrate episodes' `meta.project` into the column. Build this first in the
+next session: everything after it is easier with scope in place.
+
 **5. A second device** — only when one machine stops being enough. Whatever store that
 needs, sync comes from the store, not from Iam. Not planned; listed so the `Store` seam has
 a reason to stay small.
@@ -277,6 +287,8 @@ a reason to stay small.
 - **Vendor-neutral model client** (OpenAI-compatible + `base_url`) for extraction, local by
   default. The vault must not depend on any one provider.
 - **Two memory types to start.** Categories carry the rest until a type earns its keep.
+- **Scope is a field, not a tag.** `project` is nullable and first-class because `pull`
+  and `recall` have to understand it. Categories stay flat; no `key:value` convention.
 
 ## Stretch: secrets agents can use but never see
 
