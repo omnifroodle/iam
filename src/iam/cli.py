@@ -495,7 +495,9 @@ def extract(
 @app.command()
 def proposed(vault: str = typer.Option(None)):
     """List memories waiting for review."""
-    for m in _iam().list_memories(USER, vault=vault, statuses=["proposed"], limit=None):
+    for m in _iam().list_memories(
+        USER, vault=vault, statuses=["proposed"], limit=None, reason="list proposals"
+    ):
         typer.echo(f"{m.id}  {_where(m)}  {m.text[:100]}")
 
 
@@ -512,7 +514,9 @@ def reject(id: str, reason: str = typer.Option(..., prompt=True)):
 def review(vault: str = typer.Option(None)):
     """Walk through proposed memories: accept, edit, reject or skip each one."""
     iam = _iam()
-    todo = iam.list_memories(USER, vault=vault, statuses=["proposed"], limit=None)
+    todo = iam.list_memories(
+        USER, vault=vault, statuses=["proposed"], limit=None, reason="review proposals"
+    )
     if not todo:
         typer.echo("nothing to review")
         return
