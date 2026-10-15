@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "iam-vault"
+version = "0.1.0"
+description = "A personal memory vault for AI agents: the vault is canonical, every agent is a cache."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Matt Overstreet" }]
+dependencies = [
+    "pydantic>=2.6",
+    "typer>=0.12",
+    "numpy>=1.26",
+    "python-ulid>=2.7",
+    "mcp>=2.0",
+    "sentence-transformers>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+iam = "iam.cli:app"
+iam-mcp = "iam.mcp_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iam"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008"]  # typer.Option() in defaults is the typer idiom
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "anyio>=4.15.1",
+]
