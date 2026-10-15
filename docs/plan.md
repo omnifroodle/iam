@@ -234,6 +234,8 @@ will push providers to expose real memory controls.
 
 ## Phases
 
+Status as of 2026-10-15: phases 0–4 built; phase 5 not started.
+
 Each phase ends runnable and tested. Nothing in a later phase is needed to use an earlier one.
 
 **0. Scaffold** — `uv` project, package `iam`, `pyproject.toml`, ruff, pytest, this plan,

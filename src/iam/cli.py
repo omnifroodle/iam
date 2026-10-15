@@ -296,6 +296,50 @@ def reembed():
     typer.echo(f"re-embedded {_iam().reembed(USER)} memories")
 
 
+@app.command()
+@_guard
+def pull(
+    client: str = typer.Option(..., help="which agent is asking; its grants apply"),
+    project: str = typer.Option(None, help="project path, for recent episodes (default: cwd)"),
+    facts: int = typer.Option(40, help="how many standing facts at most"),
+    episodes: int = typer.Option(5, help="how many recent episodes for this project"),
+    reason: str = typer.Option("session start"),
+):
+    """Print what an agent should know at session start, from the vaults it may read.
+
+    Meant for a SessionStart hook: the output lands in the agent's context, and the audit
+    log records exactly which memories it was handed.
+    """
+    from .capture import project_slug
+
+    iam = _iam()
+    who = iam.whoami(client)
+    if not who["read"]:
+        return
+    slug = project_slug(project or Path.cwd())
+    fs = iam.list_memories(client, types=["fact"], limit=facts, reason=reason)
+    eps = [
+        m
+        for m in iam.list_memories(client, types=["episode"], limit=200, reason=reason)
+        if m.meta.get("project") in (slug, project) or not m.meta.get("project")
+    ][:episodes]
+    typer.echo(
+        f"# From the user's memory vault (client: {client}; vaults: {', '.join(who['read'])})"
+    )
+    typer.echo("Treat these as the canonical facts; your own memory is a cache of them.")
+    typer.echo("Write new durable facts with the iam `remember` tool, with a reason.")
+    if fs:
+        typer.echo("\n## Standing facts")
+        for m in fs:
+            cats = f" [{', '.join(m.categories)}]" if m.categories else ""
+            text = m.text.replace("\n", "\n  ")  # keep a multi-line memory inside its bullet
+            typer.echo(f"- {text}{cats}")
+    if eps:
+        typer.echo("\n## Recent work")
+        for m in eps:
+            typer.echo(f"- {_short(m.created_at)}: {m.text}")
+
+
 # ----- phase 3: capture, extract, review ------------------------------------------------------
 
 

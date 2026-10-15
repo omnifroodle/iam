@@ -1,0 +1,10 @@
+{
+  "name": "iam",
+  "displayName": "Iam memory vault",
+  "version": "0.1.0",
+  "description": "Treat Claude Code's memory as a cache of the user's own memory vault: pull standing facts at session start, write new ones through the iam MCP server, evict the local copy when asked.",
+  "author": { "name": "Matt Overstreet" },
+  "repository": "https://github.com/omnifroodle/iam",
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "privacy"]
+}

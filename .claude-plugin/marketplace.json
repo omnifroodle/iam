@@ -1,0 +1,11 @@
+{
+  "name": "iam",
+  "owner": { "name": "Matt Overstreet" },
+  "plugins": [
+    {
+      "name": "iam",
+      "source": "./plugin",
+      "description": "Treat Claude Code's memory as a cache of your own memory vault."
+    }
+  ]
+}

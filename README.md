@@ -11,10 +11,11 @@ Think 1Password, but for facts about you instead of passwords.
 
 ## Status
 
-Early. Phases 0–2 of [the plan](docs/plan.md) are what exists: a SQLite store, local
-embeddings, grants, an append-only audit log, a CLI, and an MCP server. Capture and
-extraction from agent transcripts, and the Claude Code plugin that makes the cache story
-real, come next.
+Early but usable. Phases 0–4 of [the plan](docs/plan.md) exist: a SQLite store, local
+embeddings, vaults and grants, an append-only audit log, a CLI, an MCP server, capture of
+Claude Code transcripts and memory files, extraction with a local model, review, eviction,
+and a Claude Code plugin that pulls the vault in at session start. The Couchbase backend
+(phase 5) is next.
 
 ## Install
 
@@ -42,6 +43,34 @@ Wire the MCP server into an agent; the client name is how grants are looked up:
 
 The agent gets `whoami`, `recall`, `remember`, `log_episode`, `capture` and `forget`.
 Every tool call requires a `reason`, and that reason is what you read in `iam audit`.
+
+## Fill it from Claude Code
+
+```bash
+iam claude-code projects                                   # what Claude Code has on disk
+iam claude-code import  --project ~/code/x --vault coding --reason "first import"
+iam review                                                 # accept, edit or reject each one
+iam claude-code capture --project ~/code/x --vault work --since 30d --reason "history"
+iam extract <source-id> --model llama3.1                   # Ollama by default; proposes, never asserts
+iam claude-code evict   --project ~/code/x --vault coding --reason "cache flush"
+```
+
+`import` turns each auto-memory file into a *proposed* memory with its origin session
+attached, no model involved. `evict` does the same and then deletes the local files, so the
+vault holds the only copy. `extract` runs an OpenAI-compatible model over a captured
+transcript; a vault marked `local-only` refuses any endpoint that is not on this machine.
+
+## Claude Code plugin
+
+The `plugin/` directory is a Claude Code plugin. It bundles the MCP server under the client
+name `claude-code`, a skill that tells Claude when to read and write the vault, and a
+session-start hook that runs `iam pull`, so the vaults you have granted land in context
+and the audit log records exactly which memories were handed over.
+
+```bash
+claude plugin marketplace add omnifroodle/iam     # then: /plugin install iam
+iam grant claude-code coding --mode read-write --reason "daily driver"
+```
 
 ## What it cannot do
 

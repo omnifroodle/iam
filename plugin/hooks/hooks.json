@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "iam pull --client claude-code --project \"$CLAUDE_PROJECT_DIR\" --reason \"session start\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
