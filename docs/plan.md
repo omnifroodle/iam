@@ -311,6 +311,16 @@ Reserved so it drops in later without reshaping anything:
 
 ## Open questions
 
+- **Project scope will not hold forever.** One nullable `project` is right today and wrong
+  eventually: projects bleed into one another, a session can sit in two at once, and a fact
+  learned in one often applies in a cousin. The field is a filter, and filters are brittle
+  where relevance is fuzzy. Signs it is time to revisit: memories duplicated across projects
+  with the same text; agents setting `everywhere` to dodge the filter; a hook that wants two
+  projects at once. Likely successors, in order of cost: `project` becomes a list; scope
+  becomes a ranking signal (same project ranks first, global next, others last) rather than
+  a hard filter; or the question is handed to recall entirely and the field goes away. Don't
+  pre-build any of these. Keep the field nullable and the filter in one place so the swap
+  is small.
 - Does `recall` deserve a hybrid (BM25 + vector) path early? Personal memories are short
   and specific; exact names and project slugs matter. Probably yes in phase 1 if SQLite
   FTS5 makes it cheap; measure first.
