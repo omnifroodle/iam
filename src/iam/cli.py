@@ -10,7 +10,7 @@ from pathlib import Path
 
 import typer
 
-from .config import home
+from .config import Config, home
 from .core import Iam, IamError, project_name
 from .models import GRANT_MODES, MEMORY_TYPES, USER, now
 
@@ -470,9 +470,9 @@ def sources(vault: str = typer.Option(None)):
 @_guard
 def extract(
     source_id: str,
-    model: str = typer.Option(None, envvar="IAM_LLM_MODEL"),
+    model: str = typer.Option(None, help="default: `iam llm` / IAM_LLM_MODEL"),
     base_url: str = typer.Option(
-        None, envvar="IAM_LLM_BASE_URL", help="OpenAI-compatible endpoint; default Ollama"
+        None, help="OpenAI-compatible endpoint; default: `iam llm` / IAM_LLM_BASE_URL / Ollama"
     ),
     reason: str = typer.Option("extract"),
 ):
@@ -481,15 +481,63 @@ def extract(
     from .extract import extract as _extract
     from .extract import make_client
 
+    cfg = Config.load()
+    model = model or cfg.llm_model
     if not model:
-        _die("pass --model or set IAM_LLM_MODEL (e.g. llama3.1 on Ollama)")
-    client, url = make_client(base_url)
+        _die("no model: run `iam llm --model <name>` or pass --model (e.g. llama3.1 on Ollama)")
+    client, url = make_client(base_url or cfg.llm_base_url)
     made = _extract(
         _iam(), USER, source_id, client=client, base_url=url, model=model, reason=reason
     )
     for m in made:
         typer.echo(f"{m.id}  {_where(m)}  {m.text}")
     typer.echo(f"proposed {len(made)}; run `iam review`")
+
+
+@app.command()
+def llm(
+    base_url: str = typer.Option(None, help="OpenAI-compatible endpoint, e.g. …/v1"),
+    model: str = typer.Option(None, help="model name the endpoint knows"),
+):
+    """Show or set the model host extraction uses. The API key stays in IAM_LLM_API_KEY."""
+    import os
+
+    from .extract import DEFAULT_BASE_URL, is_loopback
+
+    if base_url or model:
+        saved = Config.load(env=False)  # keep env overrides out of the file
+        saved.llm_base_url = base_url or saved.llm_base_url
+        saved.llm_model = model or saved.llm_model
+        saved.save()
+    cfg = Config.load()
+    url = cfg.llm_base_url or DEFAULT_BASE_URL
+    key = "set in IAM_LLM_API_KEY" if os.environ.get("IAM_LLM_API_KEY") else "not set"
+    typer.echo(f"base_url  {url}{'' if cfg.llm_base_url else '  (default: Ollama)'}")
+    typer.echo(f"model     {cfg.llm_model or '(unset)'}")
+    typer.echo(f"api key   {key}")
+    if not is_loopback(url):
+        typer.echo("note      not on this machine: local-only vaults will refuse to extract")
+
+
+@app.command()
+def serve(
+    port: int = typer.Option(8377, help="port on 127.0.0.1"),
+    open_browser: bool = typer.Option(False, "--open", help="open the page in a browser"),
+):
+    """A local page: proposals to review at the top, live, and the vault's history below,
+    drawn like `git log --graph` with one branch per project. 127.0.0.1 only."""
+    from .web import serve as _serve
+
+    server, url = _serve(Iam.open(via="web"), port)
+    typer.echo(f"iam: serving {home()} at {url}  (Ctrl-C to stop)")
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
 
 
 @app.command()

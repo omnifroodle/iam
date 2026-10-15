@@ -11,7 +11,7 @@ from ulid import ULID
 MemoryType = Literal["fact", "episode"]
 MemoryStatus = Literal["active", "superseded", "retracted", "proposed"]
 GrantMode = Literal["read", "write", "read-write"]
-Via = Literal["mcp", "cli", "extract", "import", "migrate"]
+Via = Literal["mcp", "cli", "web", "extract", "import", "migrate"]
 Action = Literal[
     "recall",
     "remember",

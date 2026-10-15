@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="iam-token" content="{{TOKEN}}">
+<title>Iam vault</title>
+<style>
+:root {
+  --bg: #fbfaf8; --panel: #ffffff; --ink: #1d1c1a; --muted: #6d6a64; --faint: #a19d95;
+  --line: #e6e3dd; --accent: #2f5bd3; --accent-ink: #ffffff; --danger: #b3261e;
+  --warn-bg: #fff6e0; --warn-line: #f0d48a; --main: #8a867e;
+  --l1: #2f5bd3; --l2: #c2410c; --l3: #15803d; --l4: #9333ea; --l5: #0e7490; --l6: #be185d;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161514; --panel: #1f1e1c; --ink: #ecebe8; --muted: #a29f98; --faint: #6f6c66;
+    --line: #34322f; --accent: #7aa2ff; --accent-ink: #0d1530; --danger: #ff8a80;
+    --warn-bg: #2b2414; --warn-line: #5c4a1c; --main: #8c8880;
+    --l1: #7aa2ff; --l2: #fb923c; --l3: #4ade80; --l4: #c084fc; --l5: #22d3ee; --l6: #f472b6;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161514; --panel: #1f1e1c; --ink: #ecebe8; --muted: #a29f98; --faint: #6f6c66;
+  --line: #34322f; --accent: #7aa2ff; --accent-ink: #0d1530; --danger: #ff8a80;
+  --warn-bg: #2b2414; --warn-line: #5c4a1c; --main: #8c8880;
+  --l1: #7aa2ff; --l2: #fb923c; --l3: #4ade80; --l4: #c084fc; --l5: #22d3ee; --l6: #f472b6;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+main { max-width: 920px; margin: 0 auto; padding: 24px 16px 64px; }
+header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+h1 { font-size: 20px; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  margin: 28px 0 10px; display: flex; align-items: center; gap: 8px; }
+.live { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; gap: 6px;
+  align-items: center; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--l3); }
+.dot.off { background: var(--danger); }
+.count { background: var(--ink); color: var(--bg); border-radius: 10px; padding: 0 7px;
+  font-size: 12px; letter-spacing: 0; }
+.chip { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px;
+  border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.proj { color: var(--c, var(--muted)); border-color: currentColor; }
+.empty { color: var(--muted); padding: 14px 16px; border: 1px dashed var(--line);
+  border-radius: 10px; }
+
+/* pending */
+.card { background: var(--panel); border: 1px solid var(--warn-line); border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 12px; transition: opacity .25s; }
+.card.done { opacity: 0.35; pointer-events: none; }
+.card .meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px;
+  color: var(--muted); margin-bottom: 8px; }
+.card textarea { width: 100%; font: 14px/1.5 var(--mono); color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+  resize: vertical; }
+.card .prov { font-size: 13px; color: var(--muted); margin: 8px 0; overflow-wrap: anywhere; }
+.card .prov q { font-style: italic; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.actions input { flex: 1 1 220px; min-width: 0; font: inherit; font-size: 14px; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+button { font: inherit; font-size: 14px; border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.reject { color: var(--danger); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px; }
+.err { color: var(--danger); font-size: 13px; }
+
+/* history */
+.toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 13px;
+  color: var(--muted); margin-bottom: 8px; }
+.toolbar select { font: inherit; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.lanes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.log { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.row { display: grid; grid-template-columns: var(--gw) 1fr; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.gutter { position: relative; }
+.seg { position: absolute; width: 2px; margin-left: -1px; }
+.elbow { position: absolute; top: 20px; bottom: 0; border-right: 2px solid; border-bottom: 2px solid;
+  border-bottom-right-radius: 12px; margin-left: -1px; }
+.node { position: absolute; top: 14px; width: 12px; height: 12px; margin-left: -6px;
+  border-radius: 50%; border: 2px solid; background: var(--panel); }
+.node.write { background: currentColor; }
+.body { padding: 9px 14px 10px 4px; min-width: 0; }
+.title { font-weight: 550; overflow-wrap: anywhere; }
+.row.read .title { font-weight: 400; color: var(--muted); }
+.sub { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 10px;
+  align-items: center; margin-top: 2px; }
+.sha { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+.msg { font-size: 14px; margin-top: 4px; overflow-wrap: anywhere; }
+.status { font-size: 12px; color: var(--danger); }
+details { margin-top: 4px; font-size: 13px; }
+details pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); margin: 6px 0 0;
+  color: var(--muted); }
+.more { display: block; margin: 12px auto 0; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Iam vault</h1>
+    <span class="live" aria-live="polite"><span class="dot" id="livedot"></span><span id="livetxt">connecting…</span></span>
+  </header>
+
+  <h2>Pending review <span class="count" id="pcount">0</span></h2>
+  <div id="pending"></div>
+
+  <h2>History</h2>
+  <div class="toolbar">
+    <label><input type="checkbox" id="reads"> show reads (recall, list, show)</label>
+    <label>actor <select id="actor"><option value="">everyone</option></select></label>
+  </div>
+  <div class="lanes" id="lanes"></div>
+  <div class="log" id="log"></div>
+  <button class="more" id="more">Load older</button>
+</main>
+<script>
+const TOKEN = document.querySelector('meta[name="iam-token"]').content;
+const LANE_W = 16, LANE_X0 = 14, MID = 20;
+let limit = 300, head = null, data = null;
+
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') n.className = v;
+    else if (k === 'style') n.style.cssText = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) n.append(c);
+  return n;
+}
+function ago(iso) {
+  const s = (Date.now() - new Date(iso)) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+// lanes: main for global, one branch per project, in order of first appearance
+let laneOf = new Map();
+function lanes(history) {
+  laneOf = new Map();
+  [...history].reverse().forEach(c => {
+    if (c.project && !laneOf.has(c.project)) laneOf.set(c.project, laneOf.size + 1);
+  });
+}
+function color(project) {
+  if (!project) return 'var(--main)';
+  return `var(--l${((laneOf.get(project) || 1) - 1) % 6 + 1})`;
+}
+function projChip(project) {
+  return project ? el('span', { class: 'chip proj', style: `--c:${color(project)}` }, '@' + project)
+                 : el('span', { class: 'chip' }, 'everywhere');
+}
+
+async function post(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json',
+    'X-Iam-Token': TOKEN }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+// ----- pending: keyed, so a card being edited survives a refresh -----
+const cards = new Map();
+function card(p) {
+  const ta = el('textarea', { rows: Math.min(6, Math.max(2, p.text.split('\n').length)),
+    'aria-label': 'memory text' });
+  ta.value = p.text;
+  const reason = el('input', { placeholder: 'reason (default: accepted / rejected in review)',
+    'aria-label': 'reason' });
+  const err = el('span', { class: 'err' });
+  const act = async (path, extra, node) => {
+    err.textContent = '';
+    try {
+      node.classList.add('done');
+      await post(path, { id: p.id, reason: reason.value, ...extra });
+      refresh(true);
+    } catch (e) { node.classList.remove('done'); err.textContent = e.message; }
+  };
+  const node = el('div', { class: 'card' });
+  const edited = () => (ta.value.trim() !== p.text.trim() ? ta.value : null);
+  node.append(
+    el('div', { class: 'meta' },
+      el('span', { class: 'chip' }, `${p.vault}/${p.type}`), projChip(p.project),
+      p.categories.map(c => el('span', { class: 'chip' }, c)),
+      el('span', {}, `proposed by ${p.actor} via ${p.via}${p.model ? ' (' + p.model + ')' : ''} · ${ago(p.created_at)}`)),
+    ta,
+    el('div', { class: 'prov' },
+      p.source ? ['from ', el('code', {}, p.source)] : null,
+      p.evidence ? [' · evidence: ', el('q', {}, p.evidence)] : null),
+    el('div', { class: 'actions' }, reason,
+      el('button', { class: 'primary', onclick: () => act('/api/accept', { text: edited() }, node) },
+        'Accept'),
+      p.project ? el('button', { title: 'accept, and let every project see it',
+        onclick: () => act('/api/accept', { text: edited(), everywhere: true }, node) },
+        'Accept everywhere') : null,
+      el('button', { class: 'reject', onclick: () => act('/api/reject', {}, node) }, 'Reject'),
+      err));
+  return node;
+}
+function renderPending(list) {
+  const box = document.getElementById('pending');
+  document.getElementById('pcount').textContent = list.length;
+  const ids = new Set(list.map(p => p.id));
+  for (const [id, n] of cards) if (!ids.has(id)) { n.remove(); cards.delete(id); }
+  list.forEach(p => { if (!cards.has(p.id)) cards.set(p.id, card(p)); box.append(cards.get(p.id)); });
+  box.querySelector('.empty')?.remove();
+  if (!list.length) box.append(el('div', { class: 'empty' }, 'Nothing waiting for review.'));
+}
+
+// ----- history: git log --graph, newest first -----
+function renderHistory(history) {
+  const showReads = document.getElementById('reads').checked;
+  const actor = document.getElementById('actor').value;
+  const rows = history.filter(c => (showReads || !c.read) && (!actor || c.actor === actor));
+  const n = laneOf.size;
+  const gw = LANE_X0 + n * LANE_W + 10;
+  // each branch spans from its newest row to its oldest, where it forks off main
+  const span = new Map();
+  rows.forEach((c, i) => {
+    if (!c.project) return;
+    const s = span.get(c.project) || { top: i, bottom: i };
+    s.bottom = i; span.set(c.project, s);
+  });
+  const log = document.getElementById('log');
+  log.replaceChildren();
+  if (!rows.length) { log.append(el('div', { class: 'empty', style: 'border:0' }, 'No history yet.')); return; }
+  rows.forEach((c, i) => {
+    const g = el('div', { class: 'gutter' });
+    const x = k => LANE_X0 + k * LANE_W;
+    g.append(el('div', { class: 'seg', style:
+      `left:${x(0)}px;top:${i === 0 ? MID : 0}px;bottom:${i === rows.length - 1 ? 'calc(100% - ' + MID + 'px)' : 0};background:var(--main)` }));
+    for (const [proj, s] of span) {
+      if (i < s.top || i > s.bottom) continue;
+      const k = laneOf.get(proj), col = color(proj);
+      const top = i === s.top ? MID : 0;
+      if (i === s.bottom) {
+        if (i !== s.top) g.append(el('div', { class: 'seg', style: `left:${x(k)}px;top:0;height:${MID}px;background:${col}` }));
+        g.append(el('div', { class: 'elbow', style: `left:${x(0)}px;width:${x(k) - x(0)}px;border-color:${col}` }));
+      } else {
+        g.append(el('div', { class: 'seg', style: `left:${x(k)}px;top:${top}px;bottom:0;background:${col}` }));
+      }
+    }
+    const k = c.project ? laneOf.get(c.project) : 0;
+    g.append(el('div', { class: 'node' + (c.read ? '' : ' write'),
+      style: `left:${x(k)}px;color:${color(c.project)};border-color:${color(c.project)}` }));
+    const gone = c.memory && c.memory.status !== 'active' && c.action !== 'forget' &&
+      !(c.memory.status === 'proposed' && c.title.startsWith('propose'));
+    const body = el('div', { class: 'body' },
+      el('div', { class: 'title' }, c.title, gone ? el('span', { class: 'status' }, '  (now ' + c.memory.status + ')') : null),
+      c.reason ? el('div', { class: 'msg' }, c.reason) : null,
+      c.text ? el('details', {}, el('summary', {}, 'full text'), el('pre', {}, c.text)) : null,
+      el('div', { class: 'sub' },
+        el('span', { class: 'sha', title: c.id }, c.short),
+        el('span', {}, `${c.actor} via ${c.via}`),
+        c.vault ? el('span', { class: 'chip' }, c.vault) : null,
+        c.project ? projChip(c.project) : null,
+        el('span', { title: new Date(c.at).toLocaleString() }, ago(c.at)),
+        c.session ? el('span', { class: 'sha', title: 'session ' + c.session }, 'session ' + c.session.slice(0, 8)) : null));
+    log.append(el('div', { class: 'row' + (c.read ? ' read' : ''), style: `--gw:${gw}px` }, g, body));
+  });
+}
+function renderLanes() {
+  const box = document.getElementById('lanes');
+  box.replaceChildren(el('span', { class: 'chip' }, 'main · everywhere'),
+    ...[...laneOf.keys()].map(p => projChip(p)));
+}
+function renderActors(history) {
+  const sel = document.getElementById('actor'), cur = sel.value;
+  const actors = [...new Set(history.map(c => c.actor))].sort();
+  sel.replaceChildren(el('option', { value: '' }, 'everyone'), ...actors.map(a => el('option', { value: a }, a)));
+  sel.value = actors.includes(cur) ? cur : '';
+}
+
+function live(ok) {
+  document.getElementById('livedot').classList.toggle('off', !ok);
+  document.getElementById('livetxt').textContent = ok
+    ? 'live · ' + new Date().toLocaleTimeString() : 'not connected — is `iam serve` running?';
+}
+async function refresh(force = false) {
+  try {
+    if (!force && data) {
+      const h = await (await fetch('/api/head')).json();
+      if (h.head === head) { live(true); return; }
+    }
+    data = await (await fetch('/api/state?limit=' + limit)).json();
+    head = data.head;
+    lanes(data.history); renderLanes(); renderActors(data.history);
+    renderPending(data.pending); renderHistory(data.history);
+    document.getElementById('more').hidden = data.history.length < limit;
+    live(true);
+  } catch (e) { live(false); }
+}
+document.getElementById('reads').addEventListener('change', () => data && renderHistory(data.history));
+document.getElementById('actor').addEventListener('change', () => data && renderHistory(data.history));
+document.getElementById('more').addEventListener('click', () => { limit += 300; refresh(true); });
+refresh(true);
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

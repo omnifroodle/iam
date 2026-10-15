@@ -200,6 +200,8 @@ iam audit [--client] [--since] [--action] [--memory <id>] [--vault]
 iam evict claude-code [--project <slug>]   push local memory to the vault, then clear it
 iam export [--vault] > vault.jsonl         the portability promise, with provenance
 iam import vault.jsonl
+iam serve [--port 8377] [--open]           the review page: pending at the top, history below
+iam llm [--base-url …] [--model …]         the model host extraction uses
 ```
 
 ### Extraction
@@ -239,7 +241,7 @@ will push providers to expose real memory controls.
 
 ## Phases
 
-Status as of 2026-10-15: phases 0–4 and 4b built; phase 5 not started.
+Status as of 2026-10-15: phases 0–4, 4b and 4c built; phase 5 not started.
 
 Each phase ends runnable and tested. Nothing in a later phase is needed to use an earlier one.
 
@@ -271,6 +273,16 @@ Claude Code slugs are mapped back to a name by asking a transcript's `cwd`. Extr
 asks the model for `scope` so a fact about the person lands global, and `iam review`
 offers `[g]lobal` to accept a project-scoped proposal for every project.
 
+**4c. Review page** — `iam serve`: one local page with the proposals waiting for review at
+the top, refreshed live (it polls every 2s, so a proposal an agent makes mid-session shows
+up while you watch), and the vault's history below, drawn like `git log --graph`: each
+audit row is a commit (a title, the reason as its message, the actor as its author), global
+memories run on main, and each project is a branch. Accept, accept everywhere, edit and
+reject go through `iam.core` and are audited `via: web`. Standard library only, one thread,
+127.0.0.1 only, a per-run token on writes and a Host check against DNS rebinding.
+The page's reads (the queue and the history) are the user's own view and are not logged,
+the same rule as `iam audit`; otherwise a 2s poll would bury the log.
+
 **5. A second device** — only when one machine stops being enough. Whatever store that
 needs, sync comes from the store, not from Iam. Not planned; listed so the `Store` seam has
 a reason to stay small.
@@ -291,7 +303,9 @@ a reason to stay small.
 - **Ungranted vaults are invisible**, not "access denied". An agent should not learn that a
   `health` vault exists.
 - **Vendor-neutral model client** (OpenAI-compatible + `base_url`) for extraction, local by
-  default. The vault must not depend on any one provider.
+  default. The vault must not depend on any one provider. The host and model live in
+  `config.json` (`iam llm`), overridden by `IAM_LLM_BASE_URL` / `IAM_LLM_MODEL`; the key
+  comes from `IAM_LLM_API_KEY` only and is never written to disk by Iam.
 - **Two memory types to start.** Categories carry the rest until a type earns its keep.
 - **Scope is a field, not a tag.** `project` is nullable and first-class because `pull`
   and `recall` have to understand it. Categories stay flat; no `key:value` convention.

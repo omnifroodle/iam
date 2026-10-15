@@ -5,6 +5,7 @@ transaction as the change they record. The CLI and the MCP server are thin skins
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -68,9 +69,10 @@ class Iam:
     @classmethod
     def init(cls, root: Path | None = None, *, embedding_model: str | None = None) -> Iam:
         root = root or home()
-        cfg = Config.load(root)
-        if embedding_model:
-            cfg.embedding_model = embedding_model
+        cfg = Config.load(root, env=False)  # so IAM_LLM_* in the shell never lands in the file
+        cfg.embedding_model = (
+            embedding_model or os.environ.get("IAM_EMBEDDER") or cfg.embedding_model
+        )
         cfg.save(root)
         iam = cls.open(root)
         for name, desc in cfg.default_vaults.items():
@@ -146,6 +148,30 @@ class Iam:
     def audit(self, **filters) -> list[AuditEntry]:
         """Reading the log is not itself logged; the user's view of the vault is not an event."""
         return self.store.query_audit(**filters)
+
+    def review_queue(self, actor: str, *, vault: str | None = None) -> list[Memory]:
+        """Proposals waiting for the user, oldest first. Like the audit log, this is the user's
+        own view and is not logged: the review page polls it, and acting on it is logged."""
+        self._user_only(actor)
+        rows = self.store.find_memories(
+            vaults=[vault] if vault else None, types=None, categories=None, statuses=["proposed"]
+        )
+        return [m for m, _ in reversed(rows)]
+
+    def history(self, actor: str, *, limit: int = 300) -> list[tuple[AuditEntry, Memory | None]]:
+        """The audit log, newest first, each row with the memory it changed as it is now."""
+        self._user_only(actor)
+        out = []
+        for e in self.store.query_audit(limit=limit):
+            mid = e.result.get("memory_id") or e.request.get("id")
+            if (
+                not mid
+                and e.action not in ("recall", "list", "export")
+                and e.result.get("memory_ids")
+            ):
+                mid = e.result["memory_ids"][0] if len(e.result["memory_ids"]) == 1 else None
+            out.append((e, self.store.get_memory(mid) if mid else None))
+        return out
 
     def migrate(self) -> list[str]:
         """One-off data moves for a vault made by an older Iam, each audited like any change."""

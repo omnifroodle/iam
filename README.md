@@ -55,10 +55,29 @@ iam extract <source-id> --model llama3.1                   # Ollama by default; 
 iam claude-code evict   --project ~/code/x --vault coding --reason "cache flush"
 ```
 
+Point extraction at any OpenAI-compatible host once; the key stays in your environment:
+
+```bash
+iam llm --base-url http://localhost:11434/v1 --model llama3.1   # or a hosted /v1 endpoint
+export IAM_LLM_API_KEY=…                                        # only if the host needs one
+```
+
 `import` turns each auto-memory file into a *proposed* memory with its origin session
 attached, no model involved. `evict` does the same and then deletes the local files, so the
 vault holds the only copy. `extract` runs an OpenAI-compatible model over a captured
 transcript; a vault marked `local-only` refuses any endpoint that is not on this machine.
+
+## Review page
+
+```bash
+iam serve --open        # http://127.0.0.1:8377/
+```
+
+One page: proposals waiting for review at the top, updating live as agents add them, with
+accept, accept-everywhere, edit and reject; below, the vault's history drawn like
+`git log --graph`, each audit row a commit with its reason as the message, global memories
+on main and one branch per project. It binds 127.0.0.1 only, and every action on it is in
+`iam audit` like any other.
 
 ## Claude Code plugin
 
