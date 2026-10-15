@@ -20,8 +20,8 @@ Think 1Password, but for facts about you instead of passwords.
    audit row is written in the same transaction as the change. There is no way to write a
    memory without an audit row, including from our own tooling.
 5. **Keep it simple until it hurts.** SQLite and numpy today. The store sits behind one
-   small interface so Couchbase (AI Data Plane agent memory, on Capella or self-managed)
-   can replace it without touching the rest.
+   small interface so something else can replace it later without touching the rest, and
+   nothing else is planned until one machine stops being enough.
 
 ## Vocabulary
 
@@ -30,7 +30,7 @@ Think 1Password, but for facts about you instead of passwords.
 | **memory** | One unit of recall: a fact or an episode. Has a type, a vault, categories, text, an embedding and provenance. |
 | **source** | Raw context a memory may be extracted from: a Claude Code transcript, an agent's local memory file, a ChatGPT export, a pasted note. Kept so provenance can point at it. |
 | **vault** | The access partition. A memory is in exactly one vault. Initial set: `personal`, `work`, `coding`. |
-| **category** | Free-form tags for filtering within or across vaults (`python`, `family`, `couchbase`). Many per memory. |
+| **category** | Free-form tags for filtering within or across vaults (`python`, `family`, `music`). Many per memory. |
 | **client** | An agent identity: `claude-code`, `claude-desktop`, `codex`, or `user` for the CLI. |
 | **grant** | client × vault × mode (`read`, `write`, `read-write`) × optional expiry. No grant, no access, and no hint that the vault exists. |
 | **audit** | Append-only log of every action against the vault. |
@@ -43,16 +43,16 @@ Two to start. Types are a closed set; categories are the open one.
   SDKs." "Lives in Tucson." A fact can `supersede` an earlier fact; the old one is kept,
   marked superseded, and stays in the audit trail.
 - **episode** — a record of work done, usually by an agent: what, where (project, repo),
-  when, outcome. "2026-10-12: re-shipped flows/01 in couchbase_notebooks; the prompt fix
-  held across 3 runs." This is the "context history" of agent work.
+  when, outcome. "2026-10-12: re-shipped notebook 01 in my-notebooks; the prompt fix held
+  across 3 runs." This is the "context history" of agent work.
 
 Likely later: `preference` if facts get crowded, `procedure` for how-to knowledge. Add a
 type only when filtering by category stops being enough.
 
 ## Data model
 
-JSON documents, deliberately shaped so each collection maps 1:1 onto a Couchbase collection
-in an `iam` scope later. IDs are ULIDs (sortable, no coordination).
+JSON documents, deliberately shaped so a document store could hold them unchanged if one
+is ever needed. IDs are ULIDs (sortable, no coordination).
 
 ```jsonc
 // memories
@@ -96,7 +96,7 @@ in an `iam` scope later. IDs are ULIDs (sortable, no coordination).
   "action": "recall",                   // recall | remember | forget | list | capture | extract | grant | revoke | evict | export | import
   "request": { "query": "how does the user like LLM clients", "types": ["fact"], "vault": "coding", "limit": 5 },
   "result": { "memory_ids": ["01J…", "01J…"], "count": 2 },
-  "reason": "Starting a session in couchbase_notebooks; checking conventions."
+  "reason": "Starting a session in my-notebooks; checking conventions."
 }
 ```
 
@@ -132,7 +132,7 @@ A hash chain over rows is a cheap later addition if tamper-evidence matters; not
                      │ iam.core  │  grants · audit · embed · search · extract
                      └─────┬─────┘
                      ┌─────▼─────┐
-                     │ Store     │  SQLite + numpy today; Couchbase later
+                     │ Store     │  SQLite + numpy
                      └───────────┘
 ```
 
@@ -152,8 +152,8 @@ A hash chain over rows is a cheap later addition if tamper-evidence matters; not
 
 About ten methods: `put_memory`, `get_memory`, `find_memories(filters) -> candidates with
 embeddings`, `put_source`, `get_source`, `grants_for(client)`, `put_grant`, `append_audit`,
-`query_audit(filters)`, `all_for_export()`. The SQLite implementation is the whole of v0.
-The Couchbase one maps collections 1:1 and swaps brute-force cosine for a vector index.
+`query_audit(filters)`, `all_for_export()`. The SQLite implementation is the whole of v0,
+and the interface exists so that stays true for as long as possible.
 
 ### `iam-mcp` — the agent surface
 
@@ -255,15 +255,16 @@ existing history.
 
 **4. Claude Code plugin** — pull / push / evict. The cache story becomes real.
 
-**5. Couchbase backend** — second `Store` implementation against Couchbase collections
-and a vector index; target AI Data Plane agent memory on Capella as it lands. Sync between
-devices comes from the backend, not from Iam.
+**5. A second device** — only when one machine stops being enough. Whatever store that
+needs, sync comes from the store, not from Iam. Not planned; listed so the `Store` seam has
+a reason to stay small.
 
 ## Decisions taken (push back now, not in phase 3)
 
 - **Python 3.11+, `uv`.** Matches the notebooks repo and the `mcp` SDK; local embeddings
   via `sentence-transformers`, the same model family the notebooks use.
 - **SQLite, one file, `~/.iam/iam.db`.** Brute-force cosine in numpy after SQL filtering.
+  No second backend until a real need shows up.
 - **Client identity by launch argument.** Simple and matches how every MCP host configures
   servers. A client that lies about its name gets that name's grants; the threat model is
   "agent over-reaches", not "hostile local process", and the audit log is the defence.
@@ -305,5 +306,3 @@ Reserved so it drops in later without reshaping anything:
   session and let `push` learn to split.
 - Should `recall` results carry a short "why this matched" for the audit log? Nice for the
   human reading `audit`, not needed to ship.
-- What does Couchbase's agent-memory API expect as a memory shape? Check when it lands and
-  adjust field names in phase 5 if the mapping is close enough to be worth it.

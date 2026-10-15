@@ -19,8 +19,9 @@ listed there; propose a change to the plan instead.
 - **Private stays local.** Embeddings run on this machine. Extraction over a `local_only`
   vault refuses a non-loopback endpoint. The model client is OpenAI-compatible with a
   `base_url`; do not add a vendor SDK.
-- **Keep it simple until it hurts.** SQLite and numpy. The `Store` protocol in
-  `src/iam/store.py` is the seam for the Couchbase backend (phase 5); keep it small.
+- **Keep it simple until it hurts.** SQLite and numpy, one machine. The `Store` protocol
+  in `src/iam/store.py` is the only seam for anything else; keep it small, and don't build
+  a second backend until there is a need the plan names.
 
 ## Loop
 

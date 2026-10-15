@@ -1,4 +1,4 @@
-"""Document shapes. JSON-shaped on purpose so each maps onto a Couchbase collection later."""
+"""Document shapes. JSON-shaped on purpose, so they travel on export unchanged."""
 
 from __future__ import annotations
 

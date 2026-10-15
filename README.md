@@ -14,8 +14,8 @@ Think 1Password, but for facts about you instead of passwords.
 Early but usable. Phases 0–4 of [the plan](docs/plan.md) exist: a SQLite store, local
 embeddings, vaults and grants, an append-only audit log, a CLI, an MCP server, capture of
 Claude Code transcripts and memory files, extraction with a local model, review, eviction,
-and a Claude Code plugin that pulls the vault in at session start. The Couchbase backend
-(phase 5) is next.
+and a Claude Code plugin that pulls the vault in at session start. It runs on one
+machine, on SQLite, on purpose.
 
 ## Install
 

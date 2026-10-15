@@ -1,4 +1,4 @@
-"""The store. One small interface; SQLite today, Couchbase later.
+"""The store. One small interface, one SQLite implementation.
 
 Each table holds the full document as JSON plus the columns needed to filter. The audit
 table is append-only and the database itself enforces it with triggers, so no code path,
