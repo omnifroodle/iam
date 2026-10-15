@@ -25,12 +25,14 @@ CREATE TABLE IF NOT EXISTS vaults (
     name TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY, type TEXT NOT NULL, vault TEXT NOT NULL, status TEXT NOT NULL,
-    created_at TEXT NOT NULL, embedding BLOB, embedding_dim INTEGER, doc TEXT NOT NULL);
+    created_at TEXT NOT NULL, embedding BLOB, embedding_dim INTEGER, doc TEXT NOT NULL,
+    project TEXT);
 CREATE INDEX IF NOT EXISTS memories_vault ON memories(vault, status, type);
 CREATE TABLE IF NOT EXISTS memory_categories (
     memory_id TEXT NOT NULL REFERENCES memories(id), category TEXT NOT NULL,
     PRIMARY KEY (memory_id, category));
 CREATE INDEX IF NOT EXISTS memory_categories_cat ON memory_categories(category);
+-- memories_project is created in _upgrade(), after an older table has gained the column
 CREATE TABLE IF NOT EXISTS sources (
     id TEXT PRIMARY KEY, kind TEXT NOT NULL, vault TEXT NOT NULL, captured_at TEXT NOT NULL,
     content_sha256 TEXT NOT NULL, doc TEXT NOT NULL);
@@ -50,6 +52,8 @@ CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit
 
 class Store(Protocol):
     def transaction(self) -> Iterator[None]: ...
+    def data_version(self) -> int: ...
+    def set_data_version(self, v: int) -> None: ...
     def put_vault(self, v: VaultInfo) -> None: ...
     def get_vault(self, name: str) -> VaultInfo | None: ...
     def list_vaults(self) -> list[VaultInfo]: ...
@@ -62,6 +66,7 @@ class Store(Protocol):
         types: Iterable[str] | None,
         categories: Iterable[str] | None,
         statuses: Iterable[str],
+        project: str | None = None,
         limit: int | None = None,
     ) -> list[tuple[Memory, np.ndarray | None]]: ...
     def put_source(self, s: Source) -> None: ...
@@ -102,8 +107,25 @@ class SqliteStore:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._upgrade()
         self._lock = threading.RLock()
         self._depth = 0
+
+    def _upgrade(self) -> None:
+        """Schema changes for a database made by an older Iam. Data moves live in core."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(memories)")}
+        if "project" not in cols:
+            self.conn.execute("ALTER TABLE memories ADD COLUMN project TEXT")
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS memories_project ON memories(project, vault, status)"
+        )
+
+    def data_version(self) -> int:
+        """Which of core's one-off data migrations have run. SQLite's user_version."""
+        return self.conn.execute("PRAGMA user_version").fetchone()[0]
+
+    def set_data_version(self, v: int) -> None:
+        self.conn.execute(f"PRAGMA user_version = {int(v)}")
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
@@ -141,8 +163,19 @@ class SqliteStore:
         dim = int(embedding.shape[0]) if embedding is not None else None
         with self.transaction():
             self.conn.execute(
-                "INSERT OR REPLACE INTO memories VALUES (?,?,?,?,?,?,?,?)",
-                (m.id, m.type, m.vault, m.status, m.created_at.isoformat(), blob, dim, _dump(m)),
+                "INSERT OR REPLACE INTO memories (id, type, vault, project, status, created_at, "
+                "embedding, embedding_dim, doc) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    m.id,
+                    m.type,
+                    m.vault,
+                    m.project,
+                    m.status,
+                    m.created_at.isoformat(),
+                    blob,
+                    dim,
+                    _dump(m),
+                ),
             )
             self.conn.execute("DELETE FROM memory_categories WHERE memory_id=?", (m.id,))
             self.conn.executemany(
@@ -154,7 +187,7 @@ class SqliteStore:
         return Memory.model_validate_json(row[0]) if row else None
 
     def find_memories(
-        self, *, vaults=None, types=None, categories=None, statuses, limit=None
+        self, *, vaults=None, types=None, categories=None, statuses, project=None, limit=None
     ) -> list[tuple[Memory, np.ndarray | None]]:
         statuses = list(statuses)
         where, params = [f"status IN ({_marks(len(statuses))})"], list(statuses)
@@ -175,6 +208,10 @@ class SqliteStore:
                 f"WHERE category IN ({_marks(len(categories))}))"
             )
             params += categories
+        if project is not None:
+            # The one place scope is decided: this project plus global, never another project.
+            where.append("(project IS NULL OR project = ?)")
+            params.append(project)
         sql = (
             "SELECT doc, embedding, embedding_dim FROM memories "
             f"WHERE {' AND '.join(where)} ORDER BY created_at DESC"

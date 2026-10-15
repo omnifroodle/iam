@@ -41,6 +41,15 @@ def project_dir(slug: str) -> Path:
     return claude_root() / "projects" / slug
 
 
+def project_for_slug(slug: str) -> str:
+    """The project name behind a slug. A slug cannot be reversed ('_' and '/' both became
+    '-'), so ask a transcript where it ran; failing that, the slug's last segment."""
+    for p in transcripts(slug):
+        if cwd := read_transcript(p).cwd:
+            return Path(cwd).name
+    return slug.rstrip("-").rsplit("-", 1)[-1] or slug
+
+
 # ----- transcripts ------------------------------------------------------------------------------
 
 
@@ -112,7 +121,8 @@ def transcripts(slug: str, since: datetime | None = None) -> list[Path]:
 def capture_transcripts(
     iam: Iam, actor: str, slug: str, *, vault: str, reason: str, since: datetime | None = None
 ) -> list[Source]:
-    """One source per session with any conversation in it. Unchanged sessions are skipped."""
+    """One source per session with any conversation in it. Unchanged sessions are skipped.
+    Each source's project is the basename of the directory the session ran in."""
     seen = {(s.origin, s.content_sha256) for s in iam.store.list_sources()}
     import hashlib
 
@@ -133,6 +143,7 @@ def capture_transcripts(
                 content=content,
                 vault=vault,
                 reason=reason,
+                project=Path(t.cwd).name if t.cwd else project_for_slug(slug),
             )
         )
     return out
@@ -167,12 +178,14 @@ def parse_memory_file(path: Path) -> tuple[dict[str, str], str]:
 
 
 def import_memory_dir(
-    iam: Iam, actor: str, slug: str, *, vault: str, reason: str
+    iam: Iam, actor: str, slug: str, *, vault: str, reason: str, project: str | None = None
 ) -> list[tuple[Path, Memory | None]]:
     """Each memory file becomes a captured source plus one proposed fact for the user to accept.
+    The fact is scoped to the project the memory dir belongs to (default: the slug's).
 
     A file whose content was already captured is skipped, so this is safe to re-run.
     """
+    project = project or project_for_slug(slug)
     seen = {s.content_sha256 for s in iam.store.list_sources()}
     import hashlib
 
@@ -190,6 +203,7 @@ def import_memory_dir(
             content=raw,
             vault=vault,
             reason=reason,
+            project=project,
         )
         text = body if body else meta.get("description", "")
         if desc := meta.get("description"):
@@ -203,21 +217,23 @@ def import_memory_dir(
             vault,
             categories=cats,
             reason=reason,
+            project=project,
             status="proposed",
             via="import",
             source_ids=[src.id],
             session=meta.get("originSessionId"),
-            meta={"name": meta.get("name", p.stem), "file": p.name, "project": slug},
+            meta={"name": meta.get("name", p.stem), "file": p.name, "slug": slug},
         )
         out.append((p, m))
     return out
 
 
 def evict_memory_dir(
-    iam: Iam, actor: str, slug: str, *, vault: str, reason: str
+    iam: Iam, actor: str, slug: str, *, vault: str, reason: str, project: str | None = None
 ) -> tuple[list[tuple[Path, Memory | None]], list[Path]]:
     """Import, then delete. The vault now holds the only copy; the agent will rebuild its cache."""
-    imported = import_memory_dir(iam, actor, slug, vault=vault, reason=reason)
+    project = project or project_for_slug(slug)
+    imported = import_memory_dir(iam, actor, slug, vault=vault, reason=reason, project=project)
     removed = []
     for p, _ in imported:
         p.unlink()
@@ -229,7 +245,7 @@ def evict_memory_dir(
     iam._log(  # noqa: SLF001 - eviction is a vault event, recorded like the rest
         actor,
         "evict",
-        request={"agent": "claude-code", "project": slug, "vault": vault},
+        request={"agent": "claude-code", "slug": slug, "project": project, "vault": vault},
         result={
             "memory_ids": [m.id for _, m in imported if m],
             "removed": [str(p) for p in removed],

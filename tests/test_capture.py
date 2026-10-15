@@ -7,6 +7,7 @@ from iam.capture import (
     evict_memory_dir,
     import_memory_dir,
     parse_memory_file,
+    project_for_slug,
     project_slug,
     read_transcript,
 )
@@ -129,3 +130,16 @@ def test_evict_removes_files_after_import(seeded, claude_home):
     assert seeded.store.get_memory(imported[0][1].id).status == "proposed"
     e = seeded.audit(action="evict")[0]
     assert e.result["memory_ids"] == [imported[0][1].id] and len(e.result["removed"]) == 2
+
+
+def test_project_for_slug_asks_a_transcript(claude_home):
+    assert project_for_slug(SLUG) == "proj"  # cwd /tmp/proj, from sess1.jsonl
+    assert project_for_slug("-Volumes-x-no-such-thing") == "thing"
+
+
+def test_capture_and_import_set_the_project(seeded, claude_home):
+    src = capture_transcripts(seeded, USER, SLUG, vault="coding", reason="t")[0]
+    assert src.project == "proj"
+    _, m = import_memory_dir(seeded, USER, SLUG, vault="coding", reason="t", project="iam")[0]
+    assert m.project == "iam" and "project" not in m.meta and m.meta["slug"] == SLUG
+    assert seeded.audit(action="remember")[0].request["project"] == "iam"

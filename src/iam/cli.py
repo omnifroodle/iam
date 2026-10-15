@@ -11,7 +11,7 @@ from pathlib import Path
 import typer
 
 from .config import home
-from .core import Iam, IamError
+from .core import Iam, IamError, project_name
 from .models import GRANT_MODES, MEMORY_TYPES, USER, now
 
 app = typer.Typer(
@@ -56,6 +56,10 @@ def _parse_duration(s: str) -> timedelta:
 
 def _short(ts) -> str:
     return ts.strftime("%Y-%m-%d %H:%M")
+
+
+def _where(m) -> str:
+    return f"[{m.vault}/{m.type}{' @' + m.project if m.project else ''}]"
 
 
 @app.command()
@@ -130,6 +134,7 @@ def add(
     text: str,
     type: str = typer.Option("fact", "--type", help="|".join(MEMORY_TYPES)),
     vault: str = typer.Option(..., help="which vault"),
+    project: str = typer.Option(None, help="the project it applies to (default: everywhere)"),
     cat: list[str] = typer.Option([], "--cat"),
     supersedes: str = typer.Option(None),
     reason: str = typer.Option(..., prompt=True),
@@ -138,7 +143,14 @@ def add(
     if type not in MEMORY_TYPES:
         _die(f"type must be one of {', '.join(MEMORY_TYPES)}")
     m = _iam().remember(
-        USER, text, type, vault, categories=cat, supersedes=supersedes, reason=reason
+        USER,
+        text,
+        type,
+        vault,
+        project=project,
+        categories=cat,
+        supersedes=supersedes,
+        reason=reason,
     )
     typer.echo(m.id)
 
@@ -149,6 +161,7 @@ def search(
     query: str,
     type: str = typer.Option(None, "--type"),
     vault: str = typer.Option(None),
+    project: str = typer.Option(None, help="this project plus global (default: all)"),
     cat: list[str] = typer.Option([], "--cat"),
     limit: int = 10,
     reason: str = typer.Option(None),
@@ -160,12 +173,13 @@ def search(
         types=[type] if type else None,
         categories=cat or None,
         vault=vault,
+        project=project,
         limit=limit,
         reason=reason,
     )
     for h in hits:
         m = h.memory
-        typer.echo(f"{h.score:5.2f}  {m.id}  [{m.vault}/{m.type}]  {m.text}")
+        typer.echo(f"{h.score:5.2f}  {m.id}  {_where(m)}  {m.text}")
     if not hits:
         typer.echo("nothing matched", err=True)
 
@@ -175,6 +189,7 @@ def search(
 def list_(
     type: str = typer.Option(None, "--type"),
     vault: str = typer.Option(None),
+    project: str = typer.Option(None, help="this project plus global (default: all)"),
     cat: list[str] = typer.Option([], "--cat"),
     status: str = typer.Option("active"),
     limit: int = 100,
@@ -185,10 +200,11 @@ def list_(
         types=[type] if type else None,
         categories=cat or None,
         vault=vault,
+        project=project,
         statuses=[status],
         limit=limit,
     ):
-        typer.echo(f"{m.id}  {_short(m.created_at)}  [{m.vault}/{m.type}]  {m.text}")
+        typer.echo(f"{m.id}  {_short(m.created_at)}  {_where(m)}  {m.text}")
 
 
 @app.command()
@@ -300,7 +316,7 @@ def reembed():
 @_guard
 def pull(
     client: str = typer.Option(..., help="which agent is asking; its grants apply"),
-    project: str = typer.Option(None, help="project path, for recent episodes (default: cwd)"),
+    project: str = typer.Option(None, help="project name or path (default: cwd)"),
     facts: int = typer.Option(40, help="how many standing facts at most"),
     episodes: int = typer.Option(5, help="how many recent episodes for this project"),
     reason: str = typer.Option("session start"),
@@ -310,21 +326,16 @@ def pull(
     Meant for a SessionStart hook: the output lands in the agent's context, and the audit
     log records exactly which memories it was handed.
     """
-    from .capture import project_slug
-
     iam = _iam()
     who = iam.whoami(client)
     if not who["read"]:
         return
-    slug = project_slug(project or Path.cwd())
-    fs = iam.list_memories(client, types=["fact"], limit=facts, reason=reason)
-    eps = [
-        m
-        for m in iam.list_memories(client, types=["episode"], limit=200, reason=reason)
-        if m.meta.get("project") in (slug, project) or not m.meta.get("project")
-    ][:episodes]
+    here = project_name(project or Path.cwd())
+    fs = iam.list_memories(client, types=["fact"], project=here, limit=facts, reason=reason)
+    eps = iam.list_memories(client, types=["episode"], project=here, limit=episodes, reason=reason)
     typer.echo(
-        f"# From the user's memory vault (client: {client}; vaults: {', '.join(who['read'])})"
+        f"# From the user's memory vault (client: {client}; project: {here}; "
+        f"vaults: {', '.join(who['read'])})"
     )
     typer.echo("Treat these as the canonical facts; your own memory is a cache of them.")
     typer.echo("Write new durable facts with the iam `remember` tool, with a reason.")
@@ -333,7 +344,8 @@ def pull(
         for m in fs:
             cats = f" [{', '.join(m.categories)}]" if m.categories else ""
             text = m.text.replace("\n", "\n  ")  # keep a multi-line memory inside its bullet
-            typer.echo(f"- {text}{cats}")
+            scope = " (this project)" if m.project else ""
+            typer.echo(f"- {text}{cats}{scope}")
     if eps:
         typer.echo("\n## Recent work")
         for m in eps:
@@ -353,6 +365,10 @@ def _slug(project: str | None) -> str:
     from .capture import project_slug
 
     return project_slug(project or Path.cwd())
+
+
+def _name(project: str | None) -> str | None:
+    return project_name(Path(project or Path.cwd()).resolve())
 
 
 @claude_app.command("projects")
@@ -391,10 +407,13 @@ def claude_import(
     vault: str = typer.Option(...),
     reason: str = typer.Option(..., prompt=True),
 ):
-    """Turn Claude Code's memory files into proposed memories. Nothing is deleted."""
+    """Turn Claude Code's memory files into proposed memories, scoped to the project they
+    belong to. Nothing is deleted."""
     from .capture import import_memory_dir
 
-    for path, m in import_memory_dir(_iam(), USER, _slug(project), vault=vault, reason=reason):
+    for path, m in import_memory_dir(
+        _iam(), USER, _slug(project), vault=vault, reason=reason, project=_name(project)
+    ):
         typer.echo(f"{m.id if m else 'already captured':26s}  {path.name}")
     typer.echo("run `iam review` to accept them")
 
@@ -417,7 +436,9 @@ def claude_evict(
         return
     if not yes and not typer.confirm(f"import and delete {len(files)} memory file(s) in {slug}?"):
         raise typer.Exit(1)
-    imported, removed = evict_memory_dir(_iam(), USER, slug, vault=vault, reason=reason)
+    imported, removed = evict_memory_dir(
+        _iam(), USER, slug, vault=vault, reason=reason, project=_name(project)
+    )
     typer.echo(
         f"imported {sum(1 for _, m in imported if m)} as proposed, removed {len(removed)} file(s)"
     )
@@ -456,7 +477,7 @@ def extract(
         _iam(), USER, source_id, client=client, base_url=url, model=model, reason=reason
     )
     for m in made:
-        typer.echo(f"{m.id}  [{m.type}]  {m.text}")
+        typer.echo(f"{m.id}  {_where(m)}  {m.text}")
     typer.echo(f"proposed {len(made)}; run `iam review`")
 
 
@@ -464,7 +485,7 @@ def extract(
 def proposed(vault: str = typer.Option(None)):
     """List memories waiting for review."""
     for m in _iam().list_memories(USER, vault=vault, statuses=["proposed"], limit=None):
-        typer.echo(f"{m.id}  [{m.vault}/{m.type}]  {m.text[:100]}")
+        typer.echo(f"{m.id}  {_where(m)}  {m.text[:100]}")
 
 
 @app.command()
@@ -489,6 +510,7 @@ def review(vault: str = typer.Option(None)):
         typer.secho(
             f"[{i}/{len(todo)}] {m.id}  {m.vault}/{m.type}  {' '.join(m.categories)}", bold=True
         )
+        typer.echo(f"  applies: {'project ' + m.project if m.project else 'everywhere'}")
         typer.echo(m.text)
         p = m.provenance
         typer.echo(
@@ -499,13 +521,14 @@ def review(vault: str = typer.Option(None)):
                 dim=True,
             )
         )
-        choice = (
-            typer.prompt("  [a]ccept / [e]dit / [r]eject / [s]kip / [q]uit", default="s")
-            .strip()
-            .lower()[:1]
-        )
+        menu = "  [a]ccept / [e]dit / [r]eject / [s]kip / [q]uit"
+        if m.project:
+            menu = menu.replace(" / [e]dit", " / [g]lobal: accept for every project / [e]dit")
+        choice = typer.prompt(menu, default="s").strip().lower()[:1]
         if choice == "a":
             iam.accept(USER, m.id, reason="accepted in review")
+        elif choice == "g" and m.project:
+            iam.accept(USER, m.id, reason="accepted in review, for every project", everywhere=True)
         elif choice == "e":
             text = typer.prompt("  text", default=m.text)
             iam.accept(USER, m.id, reason="edited in review", text=text)

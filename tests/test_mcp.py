@@ -46,9 +46,31 @@ async def test_mcp_tools_respect_grants_and_audit(seeded):
         project="iam",
         outcome="tests pass",
     )
-    assert ep["type"] == "episode" and ep["meta"]["project"] == "iam"
+    assert ep["type"] == "episode" and ep["project"] == "iam"
 
     entries = seeded.audit(actor="claude-code")
     assert {e.action for e in entries} >= {"recall", "remember"}
     assert all(e.session == "sess-1" and e.via == "mcp" for e in entries)
     assert seeded.store.get_memory(ok["id"]).provenance.actor == "claude-code"
+
+
+@pytest.mark.anyio
+async def test_mcp_scopes_to_its_project(seeded):
+    seeded.via = "mcp"
+    seeded.grant(USER, "claude-code", "work", "read-write", reason="t")
+    other = seeded.remember(USER, "Iam work note.", "fact", "work", reason="s", project="iam")
+    server = build(seeded, "claude-code", session="s", project="/Volumes/x/couchbase_notebooks")
+
+    assert (await call(server, "whoami"))["project"] == "couchbase_notebooks"
+    got = await call(server, "recall", query="note notebooks", reason="r")
+    ids = {h["id"] for h in got["hits"]}
+    assert other.id not in ids and any(h["project"] == "couchbase_notebooks" for h in got["hits"])
+
+    here = await call(server, "remember", text="Uses a live cluster.", vault="work", reason="r")
+    glob = await call(
+        server, "remember", text="Likes short PRs.", vault="work", reason="r", everywhere=True
+    )
+    ep = await call(server, "log_episode", summary="Did a thing.", vault="work", reason="r")
+    assert here["project"] == ep["project"] == "couchbase_notebooks" and glob["project"] is None
+    src = await call(server, "capture", content="raw", vault="work", reason="r")
+    assert seeded.store.get_source(src["source_id"]).project == "couchbase_notebooks"

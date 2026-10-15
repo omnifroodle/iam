@@ -32,6 +32,7 @@ REPLY = json.dumps(
                 "type": "fact",
                 "text": "Uses uv for Python projects.",
                 "categories": ["python"],
+                "scope": "everywhere",
                 "evidence": "use uv",
             },
             {
@@ -108,3 +109,19 @@ def test_local_only_vault_refuses_remote_model(seeded):
         model="local",
         reason="r",
     )
+
+
+def test_extract_scopes_to_the_source_project_unless_everywhere(seeded):
+    src = seeded.capture(
+        USER, kind="note", origin="t", content="x", vault="coding", reason="r", project="iam"
+    )
+    fact, episode = extract(
+        seeded,
+        USER,
+        src.id,
+        client=FakeClient(REPLY),
+        base_url="http://localhost:11434/v1",
+        model="m",
+        reason="r",
+    )
+    assert fact.project is None and episode.project == "iam"

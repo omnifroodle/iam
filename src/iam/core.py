@@ -33,6 +33,24 @@ class IamError(Exception):
     """A refusal the caller should see. Never reveals whether an ungranted vault exists."""
 
 
+ALL_STATUSES = ["active", "superseded", "proposed", "retracted"]
+DATA_VERSION = 1  # 1: episodes' meta.project moved into the project column
+
+
+def project_name(value: str | Path | None) -> str | None:
+    """A project is a short name, not a path: the basename of the working directory."""
+    if value is None:
+        return None
+    s = str(value).strip().rstrip("/")
+    if not s:
+        return None
+    if s.startswith("-") and "/" not in s:  # a Claude Code slug from before 4b
+        from .capture import project_for_slug
+
+        return project_for_slug(s)
+    return Path(s).name if "/" in s else s
+
+
 class Iam:
     def __init__(self, store: Store, embedder: Embedder, *, via: str = "cli"):
         self.store = store
@@ -43,7 +61,9 @@ class Iam:
     def open(cls, root: Path | None = None, *, via: str = "cli") -> Iam:
         root = root or home()
         cfg = Config.load(root)
-        return cls(SqliteStore(db_path(root)), get_embedder(cfg.embedding_model), via=via)
+        iam = cls(SqliteStore(db_path(root)), get_embedder(cfg.embedding_model), via=via)
+        iam.migrate()
+        return iam
 
     @classmethod
     def init(cls, root: Path | None = None, *, embedding_model: str | None = None) -> Iam:
@@ -90,6 +110,14 @@ class Iam:
             raise IamError(f"no readable vault named {vault!r}")
         return [vault]
 
+    def _project_scope(self, actor: str, project: str | None) -> str | None:
+        """None means every project, and only the user gets that. An agent with no project
+        sees global memories only, never another project's."""
+        project = project_name(project)
+        if project is None and actor != USER:
+            return ""  # matches no project, so only the global (NULL) rows survive
+        return project
+
     # ----- audit ----------------------------------------------------------------------------
 
     def _log(
@@ -101,10 +129,11 @@ class Iam:
         result: dict[str, Any] | None = None,
         reason: str | None,
         session: str | None,
+        via: str | None = None,
     ) -> AuditEntry:
         e = AuditEntry(
             actor=actor,
-            via=self.via,
+            via=via or self.via,  # type: ignore[arg-type]
             session=session,
             action=action,  # type: ignore[arg-type]
             request=request or {},
@@ -118,6 +147,34 @@ class Iam:
         """Reading the log is not itself logged; the user's view of the vault is not an event."""
         return self.store.query_audit(**filters)
 
+    def migrate(self) -> list[str]:
+        """One-off data moves for a vault made by an older Iam, each audited like any change."""
+        if self.store.data_version() >= DATA_VERSION:
+            return []
+        moved = []
+        with self.store.transaction():
+            if self.store.data_version() >= DATA_VERSION:
+                return []  # another process got here first
+            rows = self.store.find_memories(
+                vaults=None, types=None, categories=None, statuses=ALL_STATUSES
+            )
+            for m, vec in rows:
+                if _lift_project(m):
+                    self.store.put_memory(m, vec)
+                    moved.append(m.id)
+            if moved:
+                self._log(
+                    USER,
+                    "migrate",
+                    request={"change": "meta.project -> project"},
+                    result={"memory_ids": moved, "count": len(moved)},
+                    reason="Iam 4b: project became a field; moved meta.project into it",
+                    session=None,
+                    via="migrate",
+                )
+            self.store.set_data_version(DATA_VERSION)
+        return moved
+
     # ----- read ------------------------------------------------------------------------------
 
     def recall(
@@ -128,15 +185,18 @@ class Iam:
         types: Iterable[str] | None = None,
         categories: Iterable[str] | None = None,
         vault: str | None = None,
+        project: str | None = None,
         limit: int = 10,
         reason: str | None = None,
         session: str | None = None,
     ) -> list[Hit]:
+        """project: this project's memories plus global ones; None means no project filter."""
         scope = self._scope(actor, vault)
+        project = self._project_scope(actor, project)
         types = list(types) if types else None
         categories = list(categories) if categories else None
         cands = self.store.find_memories(
-            vaults=scope, types=types, categories=categories, statuses=["active"]
+            vaults=scope, types=types, categories=categories, statuses=["active"], project=project
         )
         hits: list[Hit] = []
         if cands:
@@ -156,6 +216,7 @@ class Iam:
                 "types": types,
                 "categories": categories,
                 "vault": vault,
+                "project": project,
                 "limit": limit,
             },
             result={"memory_ids": [h.memory.id for h in hits], "count": len(hits), "vaults": scope},
@@ -171,14 +232,21 @@ class Iam:
         types=None,
         categories=None,
         vault=None,
+        project: str | None = None,
         statuses=("active",),
         limit: int | None = 100,
         reason=None,
         session=None,
     ) -> list[Memory]:
         scope = self._scope(actor, vault)
+        project = self._project_scope(actor, project)
         rows = self.store.find_memories(
-            vaults=scope, types=types, categories=categories, statuses=list(statuses), limit=limit
+            vaults=scope,
+            types=types,
+            categories=categories,
+            statuses=list(statuses),
+            project=project,
+            limit=limit,
         )
         mems = [m for m, _ in rows]
         self._log(
@@ -188,6 +256,7 @@ class Iam:
                 "types": types,
                 "categories": categories,
                 "vault": vault,
+                "project": project,
                 "statuses": list(statuses),
             },
             result={"memory_ids": [m.id for m in mems], "count": len(mems), "vaults": scope},
@@ -220,6 +289,7 @@ class Iam:
         vault: str,
         *,
         reason: str,
+        project: str | None = None,
         categories: Iterable[str] = (),
         supersedes: str | None = None,
         source_ids: Iterable[str] = (),
@@ -248,6 +318,7 @@ class Iam:
         m = Memory(
             type=type,
             vault=vault,
+            project=project_name(project),
             categories=sorted({c.strip() for c in categories if c.strip()}),  # type: ignore[arg-type]
             text=text,
             embedding_model=self.embedder.name,
@@ -271,6 +342,7 @@ class Iam:
                 request={
                     "type": type,
                     "vault": vault,
+                    "project": m.project,
                     "categories": m.categories,
                     "supersedes": supersedes,
                     "text": text,
@@ -307,9 +379,11 @@ class Iam:
         *,
         reason: str,
         text: str | None = None,
+        everywhere: bool = False,
         session: str | None = None,
     ) -> Memory:
-        """Turn a proposed memory into an active one. Editing the text re-embeds it."""
+        """Turn a proposed memory into an active one. Editing the text re-embeds it;
+        everywhere drops its project, for a fact that turned out not to be project-specific."""
         m = self.store.get_memory(id)
         if m is None or m.status != "proposed" or m.vault not in self.writable(actor):
             raise IamError(f"no proposed memory {id!r}")
@@ -319,13 +393,15 @@ class Iam:
             m.embedding_model = self.embedder.name
         else:
             vec = self._embedding_of(id)
+        if everywhere:
+            m.project = None
         with self.store.transaction():
             m.status = "active"
             self.store.put_memory(m, vec)
             self._log(
                 actor,
                 "remember",
-                request={"id": id, "accepted": True, "text": m.text},
+                request={"id": id, "accepted": True, "text": m.text, "project": m.project},
                 result={"memory_id": id, "memory_ids": [id], "vault": m.vault, "status": "active"},
                 reason=reason,
                 session=session,
@@ -347,6 +423,7 @@ class Iam:
         content: str,
         vault: str,
         reason: str,
+        project: str | None = None,
         session: str | None = None,
     ) -> Source:
         if vault not in self.writable(actor):
@@ -354,6 +431,7 @@ class Iam:
         s = Source(
             kind=kind,
             vault=vault,
+            project=project_name(project),
             origin=origin,
             content=content,
             content_sha256=hashlib.sha256(content.encode()).hexdigest(),
@@ -365,7 +443,13 @@ class Iam:
             self._log(
                 actor,
                 "capture",
-                request={"kind": kind, "origin": origin, "vault": vault, "bytes": len(content)},
+                request={
+                    "kind": kind,
+                    "origin": origin,
+                    "vault": vault,
+                    "project": s.project,
+                    "bytes": len(content),
+                },
                 result={"source_id": s.id, "vault": vault},
                 reason=reason,
                 session=session,
@@ -488,6 +572,7 @@ class Iam:
         with self.store.transaction():
             for d in docs:
                 m = Memory.model_validate(d)
+                _lift_project(m)  # an export from before 4b
                 self._require_vault(m.vault)
                 if self.store.get_memory(m.id):
                     continue
@@ -509,10 +594,7 @@ class Iam:
         """Re-embed every memory with the current model. Not a memory event; not logged per row."""
         self._user_only(actor)
         rows = self.store.find_memories(
-            vaults=None,
-            types=None,
-            categories=None,
-            statuses=["active", "superseded", "proposed", "retracted"],
+            vaults=None, types=None, categories=None, statuses=ALL_STATUSES
         )
         if not rows:
             return 0
@@ -522,6 +604,15 @@ class Iam:
                 m.embedding_model = self.embedder.name
                 self.store.put_memory(m, v)
         return len(rows)
+
+
+def _lift_project(m: Memory) -> bool:
+    """Before 4b an episode's project rode in meta. Move it into the field; True if it moved."""
+    if "project" not in m.meta:
+        return False
+    old = m.meta.pop("project")
+    m.project = m.project or project_name(old)
+    return True
 
 
 def session_id() -> str:

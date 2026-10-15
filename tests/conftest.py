@@ -41,6 +41,6 @@ def seeded(iam):
         "work",
         categories=["couchbase"],
         reason="seed",
-        meta={"project": "couchbase_notebooks"},
+        project="couchbase_notebooks",
     )
     return iam

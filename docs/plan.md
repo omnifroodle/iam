@@ -82,7 +82,8 @@ is ever needed. IDs are ULIDs (sortable, no coordination).
 // sources (raw context)
 {
   "id": "01J...", "kind": "claude-code-transcript",   // | claude-code-memory | chatgpt-export | file | capture
-  "vault": "coding", "origin": "~/.claude/projects/…/52c6….jsonl",
+  "vault": "coding", "project": "iam",                // extracted memories default to it
+  "origin": "~/.claude/projects/…/52c6….jsonl",
   "content_sha256": "…", "content": "…",              // or a path, for large ones
   "captured_at": "…", "captured_by": "user", "reason": "weekly capture"
 }
@@ -172,10 +173,10 @@ Tools, all logged, all requiring `reason`:
 
 | tool | does |
 |---|---|
-| `whoami()` | the vaults this client can read and write. Lets an agent behave without guessing. |
+| `whoami()` | the vaults this client can read and write, and its project. Lets an agent behave without guessing. |
 | `recall(query, types?, categories?, vault?, limit?, reason)` | search within granted vaults, scoped to the server's project plus global memories. Ungranted vaults are omitted, not redacted. |
 | `remember(text, type, vault, categories?, reason, supersedes?, everywhere?)` | write a memory. Scoped to the server's project unless `everywhere` is set. |
-| `log_episode(summary, project?, outcome?, reason)` | sugar for `remember(type="episode")` with the session attached. |
+| `log_episode(summary, project?, outcome?, reason)` | sugar for `remember(type="episode")` with the session attached; project defaults to the server's. |
 | `capture(content, kind, reason)` | hand over raw context for later extraction, without asserting anything. |
 | `forget(id, reason)` | retract. |
 
@@ -238,7 +239,7 @@ will push providers to expose real memory controls.
 
 ## Phases
 
-Status as of 2026-10-15: phases 0–4 built; phase 5 not started.
+Status as of 2026-10-15: phases 0–4 and 4b built; phase 5 not started.
 
 Each phase ends runnable and tested. Nothing in a later phase is needed to use an earlier one.
 
@@ -262,8 +263,13 @@ existing history.
 **4b. Project scope** — the `project` field on memories; `recall`, `list` and `pull` take
 it and return "this project plus global"; the MCP server and capture derive it from the
 working directory's basename; `iam claude-code import` sets it from the project the memory
-dir belongs to. Migrate episodes' `meta.project` into the column. Build this first in the
-next session: everything after it is easier with scope in place.
+dir belongs to. Migrate episodes' `meta.project` into the column. Built: the filter is one
+`WHERE` clause in `SqliteStore.find_memories`; an agent with no project sees global
+memories only (the user at the CLI with no `--project` sees all); the migration runs once
+on open, gated by SQLite's `user_version`, and writes one `migrate` audit row; pre-4b
+Claude Code slugs are mapped back to a name by asking a transcript's `cwd`. Extraction
+asks the model for `scope` so a fact about the person lands global, and `iam review`
+offers `[g]lobal` to accept a project-scoped proposal for every project.
 
 **5. A second device** — only when one machine stops being enough. Whatever store that
 needs, sync comes from the store, not from Iam. Not planned; listed so the `Store` seam has

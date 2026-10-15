@@ -38,3 +38,17 @@ def test_cli_roundtrip(tmp_path, monkeypatch):
     assert mid in run("list", "--status", "retracted")
     exported = run("export", "--include-retracted")
     assert mid in exported
+
+
+def test_pull_is_this_project_plus_global(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAM_HOME", str(tmp_path))
+    monkeypatch.setenv("IAM_EMBEDDER", "hash-256")
+    run("init")
+    run("grant", "claude-code", "coding", "--mode", "read", "--reason", "t")
+    run("add", "--vault", "coding", "--reason", "s", "Global fact.")
+    run("add", "--vault", "coding", "--project", "iam", "--reason", "s", "Iam fact.")
+    run("add", "--vault", "coding", "--project", "other", "--reason", "s", "Other fact.")
+    out = run("pull", "--client", "claude-code", "--project", str(tmp_path / "iam"))
+    assert "project: iam" in out and "Global fact." in out and "Iam fact. (this project)" in out
+    assert "Other fact." not in out
+    assert "@iam" in run("list") and "Other fact." not in run("list", "--project", "iam")

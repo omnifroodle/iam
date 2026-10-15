@@ -20,12 +20,16 @@ DEFAULT_BASE_URL = "http://localhost:11434/v1"  # Ollama
 
 PROMPT = """You are extracting durable memories about a person from a transcript of their
 work with an AI agent. Return JSON: {"memories": [{"type": "fact" | "episode",
-"text": "...", "categories": ["..."], "evidence": "short quote from the source"}]}.
+"text": "...", "categories": ["..."], "scope": "project" | "everywhere",
+"evidence": "short quote from the source"}]}.
 
 A fact is something durable about the person or their world: preferences, conventions,
 who they work with, tools they use, decisions they have made. Write it as a standalone
 sentence that will still make sense out of context.
 An episode is a record of work done: what, where (project or repo), how it ended.
+scope is "project" when the memory only matters inside the project the transcript is from
+(its code, its decisions), and "everywhere" when it is about the person in general (their
+preferences, their tools, where they live). Episodes are always "project".
 Skip anything transient, anything about the agent rather than the person, and anything
 you are not confident of. Fewer good memories beat many weak ones. Return at most 15.
 """
@@ -83,6 +87,7 @@ def propose(client, model: str, content: str) -> list[dict[str, Any]]:
                 "type": m["type"],
                 "text": text,
                 "categories": [str(c) for c in (m.get("categories") or [])][:6],
+                "everywhere": m["type"] == "fact" and m.get("scope") == "everywhere",
                 "evidence": (m.get("evidence") or "")[:300],
             }
         )
@@ -119,6 +124,7 @@ def extract(
                 src.vault,
                 categories=p["categories"],
                 reason=reason,
+                project=None if p["everywhere"] else src.project,
                 status="proposed",
                 via="extract",
                 model=model,

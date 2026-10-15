@@ -11,7 +11,7 @@ from ulid import ULID
 MemoryType = Literal["fact", "episode"]
 MemoryStatus = Literal["active", "superseded", "retracted", "proposed"]
 GrantMode = Literal["read", "write", "read-write"]
-Via = Literal["mcp", "cli", "extract", "import"]
+Via = Literal["mcp", "cli", "extract", "import", "migrate"]
 Action = Literal[
     "recall",
     "remember",
@@ -26,6 +26,7 @@ Action = Literal[
     "export",
     "import",
     "vault",
+    "migrate",
 ]
 
 MEMORY_TYPES: tuple[str, ...] = ("fact", "episode")
@@ -56,6 +57,7 @@ class Memory(BaseModel):
     id: str = Field(default_factory=new_id)
     type: MemoryType
     vault: str
+    project: str | None = None  # when it applies: a short name, or None for everywhere
     categories: list[str] = Field(default_factory=list)
     text: str
     embedding_model: str | None = None
@@ -63,7 +65,7 @@ class Memory(BaseModel):
     supersedes: str | None = None
     created_at: datetime = Field(default_factory=now)
     provenance: Provenance
-    meta: dict[str, Any] = Field(default_factory=dict)  # type-specific: project, outcome, ...
+    meta: dict[str, Any] = Field(default_factory=dict)  # type-specific: outcome, evidence, ...
 
 
 class Source(BaseModel):
@@ -72,6 +74,7 @@ class Source(BaseModel):
     id: str = Field(default_factory=new_id)
     kind: str
     vault: str
+    project: str | None = None  # memories extracted from it default to this project
     origin: str
     content: str
     content_sha256: str
