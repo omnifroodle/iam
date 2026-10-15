@@ -296,5 +296,180 @@ def reembed():
     typer.echo(f"re-embedded {_iam().reembed(USER)} memories")
 
 
+# ----- phase 3: capture, extract, review ------------------------------------------------------
+
+
+claude_app = typer.Typer(
+    help="Claude Code: capture its transcripts, import or evict its memory.", no_args_is_help=True
+)
+app.add_typer(claude_app, name="claude-code")
+
+
+def _slug(project: str | None) -> str:
+    from .capture import project_slug
+
+    return project_slug(project or Path.cwd())
+
+
+@claude_app.command("projects")
+def claude_projects():
+    """List the projects Claude Code has transcripts for."""
+    from .capture import list_projects, memory_files
+
+    for slug, path in list_projects():
+        n = len(list(path.glob("*.jsonl")))
+        m = len(memory_files(slug))
+        typer.echo(f"{slug}  ({n} sessions, {m} memory files)")
+
+
+@claude_app.command("capture")
+@_guard
+def claude_capture(
+    project: str = typer.Option(None, help="project path (default: cwd)"),
+    vault: str = typer.Option(...),
+    since: str = typer.Option(None, help="e.g. 7d"),
+    reason: str = typer.Option(..., prompt=True),
+):
+    """Store each session transcript as a source, ready for `iam extract`."""
+    from .capture import capture_transcripts
+
+    s = now() - _parse_duration(since) if since else None
+    made = capture_transcripts(_iam(), USER, _slug(project), vault=vault, reason=reason, since=s)
+    for src in made:
+        typer.echo(f"{src.id}  {src.origin}  ({len(src.content)} chars)")
+    typer.echo(f"captured {len(made)} session(s)")
+
+
+@claude_app.command("import")
+@_guard
+def claude_import(
+    project: str = typer.Option(None),
+    vault: str = typer.Option(...),
+    reason: str = typer.Option(..., prompt=True),
+):
+    """Turn Claude Code's memory files into proposed memories. Nothing is deleted."""
+    from .capture import import_memory_dir
+
+    for path, m in import_memory_dir(_iam(), USER, _slug(project), vault=vault, reason=reason):
+        typer.echo(f"{m.id if m else 'already captured':26s}  {path.name}")
+    typer.echo("run `iam review` to accept them")
+
+
+@claude_app.command("evict")
+@_guard
+def claude_evict(
+    project: str = typer.Option(None),
+    vault: str = typer.Option(...),
+    yes: bool = typer.Option(False, "--yes", help="delete without asking"),
+    reason: str = typer.Option(..., prompt=True),
+):
+    """Import Claude Code's memory files, then delete them. The vault holds the only copy."""
+    from .capture import evict_memory_dir, memory_files
+
+    slug = _slug(project)
+    files = memory_files(slug)
+    if not files:
+        typer.echo("no memory files to evict")
+        return
+    if not yes and not typer.confirm(f"import and delete {len(files)} memory file(s) in {slug}?"):
+        raise typer.Exit(1)
+    imported, removed = evict_memory_dir(_iam(), USER, slug, vault=vault, reason=reason)
+    typer.echo(
+        f"imported {sum(1 for _, m in imported if m)} as proposed, removed {len(removed)} file(s)"
+    )
+    typer.echo("run `iam review` to accept them")
+
+
+@app.command()
+def sources(vault: str = typer.Option(None)):
+    """List captured raw context."""
+    for s in _iam().store.list_sources([vault] if vault else None):
+        typer.echo(
+            f"{s.id}  {_short(s.captured_at)}  [{s.vault}/{s.kind}]  {s.origin}  "
+            f"({len(s.content)} chars)"
+        )
+
+
+@app.command()
+@_guard
+def extract(
+    source_id: str,
+    model: str = typer.Option(None, envvar="IAM_LLM_MODEL"),
+    base_url: str = typer.Option(
+        None, envvar="IAM_LLM_BASE_URL", help="OpenAI-compatible endpoint; default Ollama"
+    ),
+    reason: str = typer.Option("extract"),
+):
+    """Ask a model to propose memories from a source. Local by default; nothing is active
+    until reviewed."""
+    from .extract import extract as _extract
+    from .extract import make_client
+
+    if not model:
+        _die("pass --model or set IAM_LLM_MODEL (e.g. llama3.1 on Ollama)")
+    client, url = make_client(base_url)
+    made = _extract(
+        _iam(), USER, source_id, client=client, base_url=url, model=model, reason=reason
+    )
+    for m in made:
+        typer.echo(f"{m.id}  [{m.type}]  {m.text}")
+    typer.echo(f"proposed {len(made)}; run `iam review`")
+
+
+@app.command()
+def proposed(vault: str = typer.Option(None)):
+    """List memories waiting for review."""
+    for m in _iam().list_memories(USER, vault=vault, statuses=["proposed"], limit=None):
+        typer.echo(f"{m.id}  [{m.vault}/{m.type}]  {m.text[:100]}")
+
+
+@app.command()
+@_guard
+def reject(id: str, reason: str = typer.Option(..., prompt=True)):
+    """Reject a proposed memory. It is kept as retracted, like any other forget."""
+    _iam().forget(USER, id, reason=reason)
+    typer.echo(f"rejected {id}")
+
+
+@app.command()
+@_guard
+def review(vault: str = typer.Option(None)):
+    """Walk through proposed memories: accept, edit, reject or skip each one."""
+    iam = _iam()
+    todo = iam.list_memories(USER, vault=vault, statuses=["proposed"], limit=None)
+    if not todo:
+        typer.echo("nothing to review")
+        return
+    for i, m in enumerate(todo, 1):
+        typer.echo("")
+        typer.secho(
+            f"[{i}/{len(todo)}] {m.id}  {m.vault}/{m.type}  {' '.join(m.categories)}", bold=True
+        )
+        typer.echo(m.text)
+        p = m.provenance
+        typer.echo(
+            typer.style(
+                f"  via {p.via}"
+                + (f" by {p.model}" if p.model else "")
+                + (f"; evidence: {m.meta['evidence']}" if m.meta.get("evidence") else ""),
+                dim=True,
+            )
+        )
+        choice = (
+            typer.prompt("  [a]ccept / [e]dit / [r]eject / [s]kip / [q]uit", default="s")
+            .strip()
+            .lower()[:1]
+        )
+        if choice == "a":
+            iam.accept(USER, m.id, reason="accepted in review")
+        elif choice == "e":
+            text = typer.prompt("  text", default=m.text)
+            iam.accept(USER, m.id, reason="edited in review", text=text)
+        elif choice == "r":
+            iam.forget(USER, m.id, reason=typer.prompt("  why", default="rejected in review"))
+        elif choice == "q":
+            break
+
+
 if __name__ == "__main__":
     app()
