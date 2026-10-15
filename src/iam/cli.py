@@ -250,6 +250,16 @@ def capture(
     typer.echo(s.id)
 
 
+def _listed(req: dict) -> str:
+    """What a list asked for, so a pull reads as more than a blank line in the audit."""
+    if "statuses" not in req:
+        return ""
+    parts = [",".join(req.get("types") or ["all"]), ",".join(req["statuses"])]
+    if req.get("project"):
+        parts.append(f"@{req['project']}")
+    return "list " + " ".join(parts)
+
+
 @app.command()
 def audit(
     client: str = typer.Option(None),
@@ -276,7 +286,8 @@ def audit(
             or e.request.get("id")
             or e.request.get("client")
             or e.request.get("origin")
-            or ""
+            or e.request.get("change")
+            or _listed(e.request)
         )
         typer.echo(
             f"{_short(e.at)}  {e.actor:14s} {e.action:9s} {what[:60]:60s} "

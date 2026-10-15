@@ -11,10 +11,10 @@ Think 1Password, but for facts about you instead of passwords.
 
 ## Status
 
-Early but usable. Phases 0–4 of [the plan](docs/plan.md) exist: a SQLite store, local
+Early but usable. Phases 0–4 and 4b of [the plan](docs/plan.md) exist: a SQLite store, local
 embeddings, vaults and grants, an append-only audit log, a CLI, an MCP server, capture of
 Claude Code transcripts and memory files, extraction with a local model, review, eviction,
-and a Claude Code plugin that pulls the vault in at session start. It runs on one
+a Claude Code plugin that pulls the vault in at session start, and per-project scope. It runs on one
 machine, on SQLite, on purpose.
 
 ## Install
@@ -70,7 +70,13 @@ and the audit log records exactly which memories were handed over.
 ```bash
 claude plugin marketplace add omnifroodle/iam     # then: /plugin install iam
 iam grant claude-code coding --mode read-write --reason "daily driver"
+claude --plugin-dir ./plugin                      # or load it from a checkout
 ```
+
+The plugin finds `iam` and `iam-mcp` in `~/.local/bin` (where `uv tool install` puts
+them) even when that directory is not on the PATH Claude Code was launched with. Memories
+are scoped to the project Claude Code runs in, the basename of its working directory: a
+session sees that project's memories and the global ones, never another project's.
 
 ## What it cannot do
 

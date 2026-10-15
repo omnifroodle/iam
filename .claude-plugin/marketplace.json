@@ -1,6 +1,9 @@
 {
   "name": "iam",
-  "owner": { "name": "Matt Overstreet" },
+  "owner": {
+    "name": "Matt Overstreet"
+  },
+  "description": "Iam, a personal memory vault for AI agents: the vault is canonical, every agent is a cache.",
   "plugins": [
     {
       "name": "iam",

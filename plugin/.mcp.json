@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "iam": {
-      "command": "iam-mcp",
-      "args": ["--client", "claude-code"]
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/iam-exec",
+      "args": ["iam-mcp", "--client", "claude-code"]
     }
   }
 }

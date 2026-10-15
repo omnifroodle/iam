@@ -2,11 +2,11 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|clear",
+        "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "iam pull --client claude-code --project \"$CLAUDE_PROJECT_DIR\" --reason \"session start\" 2>/dev/null || true"
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/iam-exec\" iam pull --client claude-code --project \"$CLAUDE_PROJECT_DIR\" --reason \"session start\" 2>/dev/null || echo \"(The iam plugin could not run iam pull, so no memories were loaded. If the iam CLI is not installed: uv tool install git+https://github.com/omnifroodle/iam)\""
           }
         ]
       }

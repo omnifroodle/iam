@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run an installed iam command even when its directory is not on the host's PATH.
+# `uv tool install` puts iam in ~/.local/bin, which GUI-launched Claude Code often lacks.
+name="$1"
+shift
+for p in "$(command -v "$name" 2>/dev/null)" \
+    "${UV_TOOL_BIN_DIR:+$UV_TOOL_BIN_DIR/$name}" \
+    "${XDG_BIN_HOME:+$XDG_BIN_HOME/$name}" \
+    "$HOME/.local/bin/$name"; do
+    [ -n "$p" ] && [ -x "$p" ] && exec "$p" "$@"
+done
+echo "iam: '$name' is not installed. Run: uv tool install git+https://github.com/omnifroodle/iam" >&2
+exit 127
